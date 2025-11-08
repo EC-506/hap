@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Reflex</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        background-color: #0f172a; /* bg-slate-900 */
+        color: white;
+        font-family: sans-serif;
+        overflow: hidden;
+      }
+      .animation-delay-2000 { animation-delay: 2s; }
+      .animation-delay-4000 { animation-delay: 4s; }
+      @keyframes blob {
+        0% { transform: translate(0px, 0px) scale(1); }
+        33% { transform: translate(30px, -50px) scale(1.1); }
+        66% { transform: translate(-20px, 20px) scale(0.9); }
+        100% { transform: translate(0px, 0px) scale(1); }
+      }
+      .animate-blob { animation: blob 7s infinite; }
+      .text-glow { text-shadow: 0 0 5px rgba(255, 255, 255, 0.3), 0 0 10px rgba(255, 255, 255, 0.3), 0 0 20px rgba(0, 180, 255, 0.5), 0 0 30px rgba(0, 180, 255, 0.5); }
+    </style>
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client"
+      }
+    }
+    </script>
+    <!-- Add Babel for JSX transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef, useCallback } from 'react';
+        import ReactDOM from 'react-dom/client';
+
+        // --- From types.ts ---
+        const GameState = {
+          Start: 'Start',
+          Playing: 'Playing',
+          GameOver: 'GameOver',
+        };
+
+        // --- From constants.tsx ---
+        const COLORS = ['pink', 'blue', 'green', 'yellow'];
+        const SHAPES = ['square', 'circle', 'triangle', 'diamond'];
+        const COLOR_MAP = {
+          pink: { base: 'bg-pink-500 text-pink-50', shadow: 'shadow-pink-500/70' },
+          blue: { base: 'bg-blue-500 text-blue-50', shadow: 'shadow-blue-500/70' },
+          green: { base: 'bg-green-500 text-green-50', shadow: 'shadow-green-500/70' },
+          yellow: { base: 'bg-yellow-500 text-yellow-50', shadow: 'shadow-yellow-500/70' },
+        };
+        const COLOR_TEXT_MAP = {
+          pink: 'text-pink-400',
+          blue: 'text-blue-400',
+          green: 'text-green-400',
+          yellow: 'text-yellow-400',
+        };
+        const SHAPE_MAP = {
+          square: <div className="w-full h-full bg-current" />,
+          circle: <div className="w-full h-full bg-current rounded-full" />,
+          triangle: <svg viewBox="0 0 100 85" className="w-full h-full"><polygon points="50,0 100,85 0,85" fill="currentColor"/></svg>,
+          diamond: <svg viewBox="0 0 100 100" className="w-full h-full"><polygon points="50,0 100,50 50,100 0,50" fill="currentColor"/></svg>,
+        };
+        const INITIAL_TIME = 20;
+        const TIME_BONUS_PER_CORRECT = 1;
+        const TIME_PENALTY_PER_WRONG = 2;
+        const BASE_POINTS = 100;
+        const COMBO_BONUS_MULTIPLIER = 10;
+        const MAX_GRID_SIZE = 25;
+
+        // --- Translation Texts ---
+        const translations = {
+          en: {
+            title: "Neon Reflex",
+            description: "Test your focus and reaction speed. Click the correct shapes and colors as fast as you can!",
+            start: "START GAME",
+            score: "SCORE",
+            combo: "COMBO",
+            time: "TIME",
+            clickThe: "Click the",
+            gameOver: "Game Over",
+            finalScore: "Your Final Score",
+            playAgain: "PLAY AGAIN",
+            colors: {
+              pink: "pink",
+              blue: "blue", 
+              green: "green",
+              yellow: "yellow"
+            },
+            shapes: {
+              square: "square",
+              circle: "circle",
+              triangle: "triangle",
+              diamond: "diamond"
+            }
+          },
+          ar: {
+            title: "ردود فعل نيون",
+            description: "اختبر تركيزك وسرعة رد فعلك. انقر على الأشكال والألوان الصحيحة بأسرع ما يمكن!",
+            start: "ابدأ اللعبة",
+            score: "النقاط",
+            combo: "التتابع",
+            time: "الوقت",
+            clickThe: "انقر على",
+            gameOver: "انتهت اللعبة",
+            finalScore: "نقاطك النهائية",
+            playAgain: "العب مرة أخرى",
+            colors: {
+              pink: "وردي",
+              blue: "أزرق",
+              green: "أخضر", 
+              yellow: "أصفر"
+            },
+            shapes: {
+              square: "مربع",
+              circle: "دائرة",
+              triangle: "مثلث",
+              diamond: "معين"
+            }
+          }
+        };
+
+        // --- From hooks/useGameSounds.ts ---
+        const useGameSounds = () => {
+          // In-browser sound generation
+          const audioContext = useRef(null);
+
+          const getAudioContext = () => {
+            if (!audioContext.current) {
+              audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            return audioContext.current;
+          }
+
+          const playSound = (type) => {
+            try {
+              const ctx = getAudioContext();
+              if (!ctx) return;
+              const oscillator = ctx.createOscillator();
+              const gainNode = ctx.createGain();
+
+              oscillator.connect(gainNode);
+              gainNode.connect(ctx.destination);
+
+              if (type === 'correct') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(600, ctx.currentTime);
+                gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.1);
+              } else { // 'wrong'
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(200, ctx.currentTime);
+                gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+              }
+
+              oscillator.start(ctx.currentTime);
+              oscillator.stop(ctx.currentTime + 0.2);
+            } catch (e) {
+                console.error("Could not play sound:", e);
+            }
+          };
+
+          const playCorrectSound = useCallback(() => playSound('correct'), []);
+          const playWrongSound = useCallback(() => playSound('wrong'), []);
+          
+          return { playCorrectSound, playWrongSound };
+        };
+
+        // --- From components/AnimatedBackground.tsx ---
+        const AnimatedBackground = () => {
+          return (
+            <div className="fixed top-0 left-0 w-full h-full -z-10 overflow-hidden bg-slate-900">
+              <div className="absolute w-72 h-72 md:w-96 md:h-96 bg-blue-500 rounded-full mix-blend-screen filter blur-3xl opacity-30 animate-blob top-1/4 left-1/4"></div>
+              <div className="absolute w-72 h-72 md:w-96 md:h-96 bg-pink-500 rounded-full mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-2000 top-1/2 right-1/4"></div>
+              <div className="absolute w-72 h-72 md:w-96 md:h-96 bg-green-500 rounded-full mix-blend-screen filter blur-3xl opacity-30 animate-blob animation-delay-4000 bottom-1/4 left-1/2"></div>
+            </div>
+          );
+        };
+
+        // --- From components/Shape.tsx ---
+        const Shape = ({ item, onClick }) => {
+          const { color, shape } = item;
+          const colorClasses = COLOR_MAP[color];
+          return (
+            <button
+              onClick={() => onClick(item)}
+              className={`relative flex items-center justify-center w-20 h-20 md:w-24 md:h-24 p-4 transition-all duration-200 ease-in-out transform active:scale-90 focus:outline-none ${colorClasses.base} rounded-lg shadow-lg ${colorClasses.shadow}`}
+            >
+              <div className={`w-full h-full ${colorClasses.base}`}>
+                {SHAPE_MAP[shape]}
+              </div>
+            </button>
+          );
+        };
+
+        // --- From components/GameGrid.tsx ---
+        const GameGrid = ({ items, onShapeClick }) => {
+          const numItems = items.length;
+          const gridCols = numItems <= 9 ? 'grid-cols-3' : 'grid-cols-5';
+          return (
+            <div className={`grid ${gridCols} gap-4 md:gap-6 p-4 place-items-center`}>
+              {items.map((item) => (
+                <Shape key={item.id} item={item} onClick={onShapeClick} />
+              ))}
+            </div>
+          );
+        };
+
+        // --- From components/HUD.tsx ---
+        const HUD = ({ score, timeLeft, combo, target, t }) => {
+          if (!target) return null;
+          const targetColorClass = COLOR_TEXT_MAP[target.color];
+          const colorName = t.colors[target.color];
+          const shapeName = t.shapes[target.shape];
+          
+          return (
+            <div className="w-full max-w-4xl mx-auto p-4 flex flex-col items-center">
+              <div className="w-full flex justify-between items-center text-lg md:text-2xl font-bold mb-4">
+                <div>{t.score}: <span className="text-cyan-400">{score}</span></div>
+                <div>{t.combo}: <span className="text-yellow-400">x{combo}</span></div>
+              </div>
+              <div className="relative w-full bg-slate-700 rounded-full h-6 md:h-8 overflow-hidden border-2 border-slate-500 mb-6">
+                <div 
+                  className="bg-gradient-to-r from-pink-500 to-purple-500 h-full rounded-full transition-all duration-500 ease-linear" 
+                  style={{ width: `${(timeLeft / INITIAL_TIME) * 100}%`}}
+                ></div>
+                <div className="absolute inset-0 flex items-center justify-center text-sm md:text-base font-bold text-white">
+                  {t.time}: {timeLeft}s
+                </div>
+              </div>
+              <div className="text-2xl md:text-4xl font-extrabold text-center text-glow">
+                {t.clickThe} <span className={`uppercase ${targetColorClass}`}>{colorName}</span> <span className="uppercase">{shapeName}</span>
+              </div>
+            </div>
+          );
+        };
+
+        // --- From components/StartScreen.tsx ---
+        const StartScreen = ({ onStart, t }) => {
+          return (
+            <div className="flex flex-col items-center justify-center text-center h-full">
+              <h1 className="text-6xl md:text-8xl font-black uppercase text-glow mb-4">
+                {t.title}
+              </h1>
+              <p className="text-lg md:text-xl text-slate-300 mb-12 max-w-md">
+                {t.description}
+              </p>
+              <button
+                onClick={onStart}
+                className="px-10 py-5 bg-pink-600 text-white font-bold text-2xl rounded-lg shadow-lg shadow-pink-600/50 hover:bg-pink-500 hover:scale-105 transition-all duration-300 transform"
+              >
+                {t.start}
+              </button>
+            </div>
+          );
+        };
+
+        // --- From components/GameOverScreen.tsx ---
+        const GameOverScreen = ({ score, onRestart, t }) => {
+          return (
+            <div className="flex flex-col items-center justify-center text-center h-full bg-black bg-opacity-50 backdrop-blur-sm">
+              <div className="p-10 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700">
+                <h2 className="text-5xl md:text-7xl font-black uppercase text-glow text-red-500 mb-4">
+                  {t.gameOver}
+                </h2>
+                <p className="text-xl md:text-2xl text-slate-300 mb-2">{t.finalScore}:</p>
+                <p className="text-6xl md:text-8xl font-bold text-cyan-400 mb-10">
+                  {score}
+                </p>
+                <button
+                  onClick={onRestart}
+                  className="px-10 py-5 bg-green-600 text-white font-bold text-2xl rounded-lg shadow-lg shadow-green-600/50 hover:bg-green-500 hover:scale-105 transition-all duration-300 transform"
+                >
+                  {t.playAgain}
+                </button>
+              </div>
+            </div>
+          );
+        };
+
+        // --- Language Toggle Component ---
+        const LanguageToggle = ({ currentLang, onToggle }) => {
+          return (
+            <button
+              onClick={onToggle}
+              className="fixed top-4 right-4 z-20 px-4 py-2 bg-slate-800/80 backdrop-blur-sm text-white rounded-lg border border-slate-600 hover:bg-slate-700/80 transition-all duration-300 font-bold text-sm md:text-base"
+            >
+              {currentLang === 'en' ? 'AR' : 'EN'}
+            </button>
+          );
+        };
+
+        // --- From App.tsx ---
+        const App = () => {
+          const [gameState, setGameState] = useState(GameState.Start);
+          const [score, setScore] = useState(0);
+          const [timeLeft, setTimeLeft] = useState(INITIAL_TIME);
+          const [combo, setCombo] = useState(0);
+          const [level, setLevel] = useState(1);
+          const [gridItems, setGridItems] = useState([]);
+          const [targetItem, setTargetItem] = useState(null);
+          const [language, setLanguage] = useState('en');
+
+          const timerRef = useRef(null);
+          const { playCorrectSound, playWrongSound } = useGameSounds();
+
+          const t = translations[language];
+
+          const toggleLanguage = () => {
+            setLanguage(prev => prev === 'en' ? 'ar' : 'en');
+          };
+
+          const generateLevel = useCallback(() => {
+            const gridSize = Math.min(MAX_GRID_SIZE, 4 + Math.floor(level / 2) * 2);
+            const targetColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+            const targetShape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+            const newTarget = { id: -1, color: targetColor, shape: targetShape };
+            const newGridItems = [newTarget];
+            while (newGridItems.length < gridSize) {
+              const distractorColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+              const distractorShape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+              if (distractorColor !== targetColor || distractorShape !== targetShape) {
+                newGridItems.push({ id: newGridItems.length, color: distractorColor, shape: distractorShape });
+              }
+            }
+            for (let i = newGridItems.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [newGridItems[i], newGridItems[j]] = [newGridItems[j], newGridItems[i]];
+            }
+            newGridItems.forEach((item, index) => item.id = index);
+            setGridItems(newGridItems);
+            setTargetItem(newTarget);
+          }, [level]);
+
+          const startGame = useCallback(() => {
+            setScore(0);
+            setCombo(0);
+            setLevel(1);
+            setTimeLeft(INITIAL_TIME);
+            setGameState(GameState.Playing);
+          }, []);
+
+          useEffect(() => {
+            if (gameState === GameState.Playing) {
+              generateLevel();
+            }
+          }, [gameState, level, generateLevel]);
+
+          useEffect(() => {
+            if (gameState === GameState.Playing) {
+              timerRef.current = window.setInterval(() => {
+                setTimeLeft(prev => {
+                  if (prev <= 1) {
+                    if (timerRef.current) clearInterval(timerRef.current);
+                    setGameState(GameState.GameOver);
+                    return 0;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
+            }
+            return () => {
+              if (timerRef.current) clearInterval(timerRef.current);
+            };
+          }, [gameState]);
+
+          const handleShapeClick = (clickedItem) => {
+            if (gameState !== GameState.Playing) return;
+            if (clickedItem.color === targetItem?.color && clickedItem.shape === targetItem?.shape) {
+              playCorrectSound();
+              const newCombo = combo + 1;
+              setCombo(newCombo);
+              setScore(s => s + BASE_POINTS + (newCombo * COMBO_BONUS_MULTIPLIER));
+              setTimeLeft(t => Math.min(INITIAL_TIME, t + TIME_BONUS_PER_CORRECT));
+              setLevel(l => l + 1);
+            } else {
+              playWrongSound();
+              setCombo(0);
+              setTimeLeft(t => Math.max(0, t - TIME_PENALTY_PER_WRONG));
+            }
+          };
+
+          const renderContent = () => {
+            switch (gameState) {
+              case GameState.Playing:
+                return (
+                  <div className="w-full flex flex-col items-center justify-start pt-8">
+                    <HUD score={score} timeLeft={timeLeft} combo={combo} target={targetItem} t={t} />
+                    <GameGrid items={gridItems} onShapeClick={handleShapeClick} />
+                  </div>
+                );
+              case GameState.GameOver:
+                return <GameOverScreen score={score} onRestart={startGame} t={t} />;
+              case GameState.Start:
+              default:
+                return <StartScreen onStart={startGame} t={t} />;
+            }
+          };
+
+          return (
+            <main className="relative w-screen h-screen font-sans overflow-hidden flex items-center justify-center">
+              <AnimatedBackground />
+              <LanguageToggle currentLang={language} onToggle={toggleLanguage} />
+              <div className="relative z-10 w-full h-full p-4">
+                {renderContent()}
+              </div>
+            </main>
+          );
+        };
+
+        // --- From index.tsx ---
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(
+          <React.StrictMode>
+            <App />
+          </React.StrictMode>
+        );
+    </script>
+</body>
+</html>
